@@ -5,7 +5,7 @@ use abi_stable::{
     sabi_trait::prelude::TD_Opaque,
     std_types::{RBox, RStr, RString, RVec},
 };
-use quick_search_lib::{ColoredChar, PluginId, SearchLib, SearchLib_Ref, SearchResult, Searchable, Searchable_TO};
+use quick_search_lib::{ColoredChar, Log, PluginId, SearchLib, SearchLib_Ref, SearchResult, Searchable, Searchable_TO};
 use serde::{Deserialize, Serialize};
 
 static NAME: &str = "DuckDuckGo-Search";
@@ -16,29 +16,30 @@ pub fn get_library() -> SearchLib_Ref {
 }
 
 #[sabi_extern_fn]
-fn get_searchable(id: PluginId) -> Searchable_TO<'static, RBox<()>> {
-    let this = Google::new(id);
+fn get_searchable(id: PluginId, logger: quick_search_lib::ScopedLogger) -> Searchable_TO<'static, RBox<()>> {
+    let this = DuckDuckGo::new(id, logger);
     Searchable_TO::from_value(this, TD_Opaque)
 }
 
-#[derive(Debug, Clone)]
-struct Google {
+struct DuckDuckGo {
     id: PluginId,
     client: reqwest::blocking::Client,
     config: quick_search_lib::Config,
+    logger: quick_search_lib::ScopedLogger,
 }
 
-impl Google {
-    fn new(id: PluginId) -> Self {
+impl DuckDuckGo {
+    fn new(id: PluginId, logger: quick_search_lib::ScopedLogger) -> Self {
         Self {
             id,
             client: reqwest::blocking::Client::new(),
             config: default_config(),
+            logger,
         }
     }
 }
 
-impl Searchable for Google {
+impl Searchable for DuckDuckGo {
     fn search(&self, query: RString) -> RVec<SearchResult> {
         let mut res: Vec<SearchResult> = vec![];
 
@@ -46,16 +47,6 @@ impl Searchable for Google {
 
         if let Ok(response) = self.client.get(url).send() {
             if let Ok(text) = response.json::<Vec<QueryResult>>() {
-                // if let Ok(xml) = roxmltree::Document::parse(&text) {
-                //     for node in xml.descendants() {
-                //         if node.tag_name().name() == "suggestion" {
-                //             if let Some(data) = node.attribute("data") {
-                //                 let data = data.to_string();
-                //                 res.push(SearchResult::new(&data));
-                //             }
-                //         }
-                //     }
-                // }
                 for query in text {
                     res.push(SearchResult::new(&query.phrase));
                 }
@@ -108,7 +99,7 @@ impl Searchable for Google {
         // finish up, above is a clipboard example
 
         if let Err(e) = webbrowser::open(&format!("https://ac.duckduckgo.com/?q={}", urlencoding::encode(result.title()))) {
-            log::error!("failed to open browser: {}", e);
+            self.logger.error(&format!("failed to open browser: {}", e));
         }
     }
     fn plugin_id(&self) -> PluginId {
